@@ -1,0 +1,152 @@
+---
+title: "Practical Machine Learning - Course Project"
+author: "Martin Kruse"
+date: "January 18, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Summary
+
+This document describes the development of a prediction model as part of the course project assignment of Coursera's Practical Machine Learning Class. The first part of the document describes loading and pre-processing of the data set before its modified version is going to be used in the following part to develop two different prediction models, which are subsequently being tested on an independent data set for evaluation purposes. The two models developed are a 'boosting' and a 'random forest' prediction model. As will be shown the 'random forest' model provided better accuracy than the 'boosting' model and was subsequently used to answer the questions of the quiz associated with the course project. The 'random forest' model allowed for a score of 20/20 on this quiz.
+
+##Loading and preprocessing of data sets
+
+The following code loads the two data sets, one of them being the training set and the other one being teh testing set, which is going to be used later for automated grading of the fully developed final model. Columns containing either no data or 'NA' values are recognized as NA bei the 'read.csv' command.
+
+```{r, echo=TRUE}
+training_set <- read.csv("pml-training.csv", na.strings=c("NA",""))
+prediction_set <- read.csv("pml-testing.csv", na.strings=c("NA",""))
+```
+
+An initial exploration of the data sets shows that the first seven columns contain only information about usernames or timestamps, which should not be included as predictors into the model. The following codes drops these first seven columns from the data frames.
+
+```{r, echo=TRUE}
+a = 1:7
+training_set <- subset(training_set, select = -a)
+prediction_set <- subset(prediction_set, select = -a)
+```
+
+The resulting two data frames still contain a large number of columns that have only 'NA' values or show zero information. These columns get identified with the first of the following three lines of code. The next two lines subset the training and prediction data sets based on the vector with the information which columns contain 'NA' values.
+
+```{r, echo=TRUE}
+no_NA_values<-apply(!is.na(training_set),2,sum)>19621
+training_set<-training_set[,no_NA_values]
+prediction_set<-prediction_set[,no_NA_values]
+```
+
+The resulting data sets contains 53 columns with data that will be used to build a prediction model with the training data set (see code in line below for determination of the number of columns).
+
+```{r, echo=TRUE}
+dim(training_set)
+```
+
+##Splitting of training data set into two data sets
+
+In a next step, the training data set gets split into two data frames, one of which will be used to train the models while the other one will be used to test a developed model. Eighty percent of the training set will be used to develop the models while twenty percent wil be used for evaluation.
+
+```{r, echo=TRUE}
+library(lattice)
+library(ggplot2)
+library(caret)
+inTrain <- createDataPartition(y=training_set$classe, p=0.80, list = FALSE)
+training <- training_set[inTrain,]
+testing <- training_set[-inTrain,]
+```
+
+##Development of a 'boosting' model
+
+In a first attempt the new training set is used to develop a 'boosting' prediction model.
+
+```{r, echo=TRUE, message=FALSE, cache=TRUE}
+model_boosting <- train(classe ~ ., method="gbm", data=training, verbose=FALSE)
+```
+
+The model shows an accuracy of 95.95% on the training data set.
+
+```{r, echo=TRUE}
+print(model_boosting, digit=4)
+```
+
+The 'boosting' model is subsequently used to predict the 'classe' values of the separated testing data set.
+
+```{r, message=FALSE, echo=TRUE}
+pred_boosting <- predict(model_boosting, testing)
+testing$pred_boosting_right <- pred_boosting==testing$classe
+```
+
+The following confusion matrix shows that the 'boosting' model predicts the large majority of test cases correctly, but does show some prediction errors.
+
+```{r, echo=TRUE}
+print(confusionMatrix(pred_boosting, testing$classe), digits=4)
+```
+
+```{r, echo=FALSE}
+matrix_boosting <- confusionMatrix(pred_boosting, testing$classe)
+accuracy_boosting <- as.numeric(round(matrix_boosting$overall[1],4))
+out_of_sample_boosting <- 1-accuracy_boosting
+```
+
+It shows an accuracy of `r accuracy_boosting` on the test data set, resulting in an out of sample error of `r out_of_sample_boosting`.
+
+##Development of a 'random forest' model
+
+The 'boosting' model shows great accuracy, but 'random forest' models have been shown to achieve very high accuracy as well. To determine whether a 'random forest' model might be a better prediction model, such a model has been developed. As the computation of these models is time-intensive, parallel computing is used. The following code registers a parallel computing cluster for the development of the model.
+
+```{r, echo=TRUE, message=FALSE}
+library(parallel)
+library(doParallel)
+cluster <- makeCluster(detectCores() - 1)
+registerDoParallel(cluster)
+```
+
+The following lines of code define the trainControl settings for the 'random forest' model. Here, 10-fold cross-validation is used. The last line of code de-registers the parallel computing cluster.
+
+```{r, echo=TRUE, message=FALSE, cache=TRUE}
+fitcontrol <- trainControl(method = "cv", number = 10, allowParallel=TRUE)
+model_random_forest <- train(classe ~ ., data=training, method = "rf", trControl=fitcontrol)
+stopCluster(cluster)
+```
+
+The model shows an accuracy of 99.38% on the training data set.
+
+```{r, echo=TRUE}
+print(model_random_forest, digit=4)
+```
+
+The 'random forest' model is subsequently used to predict the 'classe' values of the separated testing data set.
+
+```{r, echo=TRUE, message=FALSE}
+pred_random_forest <- predict(model_random_forest, testing)
+testing$pred_random_forest_right <- pred_random_forest==testing$classe
+```
+
+The following confusion matrix shows that the 'random forest' model predicts the vast majority of test cases correctly, and provides greater accuracy than the 'boosting' model.
+
+```{r, echo=TRUE}
+print(confusionMatrix(pred_random_forest, testing$classe), digits=4)
+```
+
+```{r, echo=FALSE}
+matrix_rf <- confusionMatrix(pred_random_forest, testing$classe)
+accuracy_rf <- as.numeric(round(matrix_rf$overall[1],4))
+out_of_sample_rf <- 1-accuracy_rf
+```
+
+It shows an accuracy of `r accuracy_rf` on the test data set, resulting in an out of sample error of `r out_of_sample_rf`.
+
+##Model selection and final prediction
+
+As the 'random forest' model shows a higher accuracy and a lower out of sample error it was used to perform the prediction on the provided test set, which is called 'prediction_set' in the following code. The last line of the code prints the calculated predicted result for the twenty test case provided by the assignment.
+
+```{r, echo=TRUE, message=FALSE}
+result <- predict(model_random_forest, prediction_set)
+print(result)
+```
+
+##Conclusion
+
+Both models achieved very high accuracy. The 'random forest' model showed slightly better accuracy and a smaller out of sample error, although it remains unclear whether this is caused by overfitting. It also has to be taken into account that the 'random forest' model was created using 10-fold cross-validation. Due to the smaller out of sample error the 'random forest' model was chosen for prediction on the twenty test cases and the results received a score of 20/20 on the automated quiz.
